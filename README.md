@@ -55,6 +55,22 @@
 
 5. 运行后应用不会出现在 Dock 中，请查看 macOS 顶部状态栏里的 `Codex` 文本。
 
+## App 包在哪里
+
+使用 Xcode 运行后，生成的 app 通常在 DerivedData 目录中：
+
+```text
+~/Library/Developer/Xcode/DerivedData/codex-quota-mac-*/Build/Products/Debug/codex-quota-mac.app
+```
+
+你也可以在 Xcode 顶部菜单中这样找到：
+
+1. 点击顶部菜单 `Product`。
+2. 选择 `Show Build Folder in Finder`。
+3. 进入 `Products/Debug`，找到 `codex-quota-mac.app`。
+
+找到 `.app` 后，可以把它复制到 `/Applications` 或任意你想放的位置。这个项目是状态栏应用，打开后不会出现在 Dock 中，请在顶部状态栏查看 `Codex` 文本。
+
 ## 使用方式
 
 - 左键点击状态栏文字：打开额度详情面板。

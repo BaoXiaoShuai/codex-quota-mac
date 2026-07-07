@@ -55,6 +55,22 @@ The app looks for `codex` in this order:
 
 5. The app will not appear in the Dock. Look for the `Codex` text in the macOS menu bar.
 
+## Where Is the App Bundle?
+
+After running the project from Xcode, the generated app bundle is usually under DerivedData:
+
+```text
+~/Library/Developer/Xcode/DerivedData/codex-quota-mac-*/Build/Products/Debug/codex-quota-mac.app
+```
+
+You can also find it from the Xcode menu:
+
+1. Click the top menu `Product`.
+2. Choose `Show Build Folder in Finder`.
+3. Open `Products/Debug` and find `codex-quota-mac.app`.
+
+Once you find the `.app`, you can copy it to `/Applications` or any other location you prefer. This is a menu bar app, so it will not appear in the Dock after launch. Look for `Codex` in the macOS menu bar.
+
 ## Usage
 
 - Left-click the menu bar text to open the quota panel.
