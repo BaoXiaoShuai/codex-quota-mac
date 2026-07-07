@@ -78,20 +78,42 @@ final class StatusBarController: NSObject {
         menu.addItem(NSMenuItem(title: "刷新额度", action: #selector(refreshQuota), keyEquivalent: "r", target: self))
         menu.addItem(.separator())
 
-        let fiveHourItem = NSMenuItem(title: "状态栏显示 5 小时额度", action: #selector(toggleFiveHour), keyEquivalent: "")
+        let fiveHourItem = NSMenuItem(title: "显示 5 小时额度", action: #selector(toggleFiveHour), keyEquivalent: "")
         fiveHourItem.target = self
         fiveHourItem.state = store.settings.showFiveHour ? .on : .off
         menu.addItem(fiveHourItem)
 
-        let weeklyItem = NSMenuItem(title: "状态栏显示 7 天额度", action: #selector(toggleWeekly), keyEquivalent: "")
+        let weeklyItem = NSMenuItem(title: "显示 7 天额度", action: #selector(toggleWeekly), keyEquivalent: "")
         weeklyItem.target = self
         weeklyItem.state = store.settings.showWeekly ? .on : .off
         menu.addItem(weeklyItem)
 
-        let summaryItem = NSMenuItem(title: "状态栏显示综合状态", action: #selector(toggleSummary), keyEquivalent: "")
-        summaryItem.target = self
-        summaryItem.state = store.settings.showSummary ? .on : .off
-        menu.addItem(summaryItem)
+        // 重置时间开关：5h 显示 HH:mm，7d 显示 M/d
+        let resetTimeItem = NSMenuItem(title: "显示重置时间", action: #selector(toggleResetTime), keyEquivalent: "")
+        resetTimeItem.target = self
+        resetTimeItem.state = store.settings.showResetTime ? .on : .off
+        menu.addItem(resetTimeItem)
+
+        menu.addItem(.separator())
+
+        // 刷新间隔子菜单
+        let intervalMenu = NSMenu()
+        let currentInterval = Int(store.settings.refreshIntervalMinutes)
+        for minutes in [1, 3, 5, 10, 30] {
+            let item = NSMenuItem(
+                title: "\(minutes) 分钟",
+                action: #selector(setRefreshInterval(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.tag = minutes
+            // 当前选中的间隔打勾
+            item.state = currentInterval == minutes ? .on : .off
+            intervalMenu.addItem(item)
+        }
+        let intervalParent = NSMenuItem(title: "刷新间隔", action: nil, keyEquivalent: "")
+        intervalParent.submenu = intervalMenu
+        menu.addItem(intervalParent)
 
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出", action: #selector(quit), keyEquivalent: "q", target: self))
@@ -138,6 +160,19 @@ final class StatusBarController: NSObject {
     /// 切换综合状态状态栏展示。
     @objc private func toggleSummary() {
         store.settings.showSummary.toggle()
+    }
+
+    /// 切换重置时间状态栏展示。
+    @objc private func toggleResetTime() {
+        store.settings.showResetTime.toggle()
+    }
+
+    /// 设置自动刷新间隔，由菜单项 tag 携带分钟数。
+    /// - Parameter sender: 触发的菜单项，tag 值为目标分钟数。
+    @objc private func setRefreshInterval(_ sender: NSMenuItem) {
+        let minutes = Double(sender.tag)
+        guard minutes > 0 else { return }
+        store.settings.refreshIntervalMinutes = minutes
     }
 
     /// 退出应用。

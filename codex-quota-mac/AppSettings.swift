@@ -25,6 +25,11 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(showSummary, forKey: Keys.showSummary) }
     }
 
+    // 是否在状态栏展示重置时间：5h 显示 HH:mm，7d 显示 M/d。
+    @Published var showResetTime: Bool {
+        didSet { defaults.set(showResetTime, forKey: Keys.showResetTime) }
+    }
+
     // 自动刷新间隔，单位为分钟。
     @Published var refreshIntervalMinutes: Double {
         didSet { defaults.set(refreshIntervalMinutes, forKey: Keys.refreshIntervalMinutes) }
@@ -39,6 +44,7 @@ final class AppSettings: ObservableObject {
         showFiveHour = defaults.object(forKey: Keys.showFiveHour) as? Bool ?? true
         showWeekly = defaults.object(forKey: Keys.showWeekly) as? Bool ?? true
         showSummary = defaults.object(forKey: Keys.showSummary) as? Bool ?? false
+        showResetTime = defaults.object(forKey: Keys.showResetTime) as? Bool ?? true
         refreshIntervalMinutes = defaults.object(forKey: Keys.refreshIntervalMinutes) as? Double ?? 3
     }
 
@@ -55,6 +61,7 @@ final class AppSettings: ObservableObject {
         static let showFiveHour = "statusBar.showFiveHour"
         static let showWeekly = "statusBar.showWeekly"
         static let showSummary = "statusBar.showSummary"
+        static let showResetTime = "statusBar.showResetTime"
         static let refreshIntervalMinutes = "quota.refreshIntervalMinutes"
     }
 }

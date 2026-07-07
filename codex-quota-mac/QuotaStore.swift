@@ -23,6 +23,20 @@ final class QuotaStore: ObservableObject {
     private let cacheURL: URL
     private let historyURL: URL
 
+    // 5h 重置时间格式：HH:mm
+    private let fiveHourTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    // 7d 重置时间格式：M/d（月/日）
+    private let weeklyDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M/d"
+        return f
+    }()
+
     /// 创建额度状态仓库。
     /// - Parameters:
     ///   - client: Codex 额度读取客户端。
@@ -97,33 +111,42 @@ final class QuotaStore: ObservableObject {
     }
 
     /// 生成状态栏标题文本。
+    /// 格式：「5h 86% 08:09 | 7d 72% 7/14」，可配置是否显示重置时间。
     /// - Returns: 根据用户配置拼出的状态栏文本。
     func statusBarTitle() -> String {
         guard let snapshot else {
             switch status {
-            case .loading:
-                return "Codex ..."
-            case .failed:
-                return "Codex --"
-            default:
-                return "Codex"
+            case .loading: return "Codex ..."
+            case .failed: return "Codex --"
+            default: return "Codex"
             }
         }
 
         var parts: [String] = []
+
         if settings.showFiveHour, let fiveHour = snapshot.fiveHourWindow {
-            parts.append("5h \(formatPercent(fiveHour.remainingPercent))")
+            var text = "5h \(formatPercent(fiveHour.remainingPercent))"
+            // 开启显示重置时间时附加 HH:mm
+            if settings.showResetTime, let d = fiveHour.resetsAt {
+                text += " \(fiveHourTimeFormatter.string(from: d))"
+            }
+            parts.append(text)
         }
+
         if settings.showWeekly, let weekly = snapshot.weeklyWindow {
-            parts.append("7d \(formatPercent(weekly.remainingPercent))")
+            var text = "7d \(formatPercent(weekly.remainingPercent))"
+            // 开启显示重置时间时附加 M/d
+            if settings.showResetTime, let d = weekly.resetsAt {
+                text += " \(weeklyDateFormatter.string(from: d))"
+            }
+            parts.append(text)
         }
-        if settings.showSummary, pace.summary != .unknown {
-            parts.append(pace.summary.title)
-        }
+
         if parts.isEmpty {
-            parts.append("Codex \(formatPercent(snapshot.remainingPercent))")
+            return "Codex \(formatPercent(snapshot.remainingPercent))"
         }
-        return parts.joined(separator: " · ")
+        // 用竖线分隔两个额度窗口
+        return parts.joined(separator: " | ")
     }
 
     /// 返回用于展示的百分比文本。
