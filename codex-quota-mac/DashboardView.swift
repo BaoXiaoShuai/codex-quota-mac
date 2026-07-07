@@ -364,7 +364,7 @@ struct QuotaCardView: View {
             .frame(minHeight: 52, alignment: .center)
 
             QuotaProgressView(
-                remainingPercent: window?.remainingPercent ?? 0,
+                usedPercent: window?.usedPercent ?? 0,
                 accent: accent
             )
 
@@ -404,26 +404,30 @@ struct QuotaCardView: View {
 }
 
 struct QuotaProgressView: View {
-    // 实际剩余额度百分比。
-    let remainingPercent: Double
+    // 已用额度百分比。
+    let usedPercent: Double
     // 进度强调色。
     let accent: Color
 
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
-            let safeRemainingPercent = min(max(remainingPercent, 0), 100)
-            let progressWidth = max(6, width * safeRemainingPercent / 100)
+            // 已用百分比限制在 0-100 内，至少保持 6pt 宽度避免圆角崩塌
+            let safeUsedPercent = min(max(usedPercent, 0), 100)
+            let progressWidth = max(6, width * safeUsedPercent / 100)
+            // 剩余 ≤ 10% 时切换为警示红
+            let isWarning = safeUsedPercent >= 90
+            let barColors: [Color] = isWarning
+                ? [Color(red: 0.95, green: 0.25, blue: 0.20).opacity(0.75),
+                   Color(red: 0.85, green: 0.10, blue: 0.10)]
+                : [accent.opacity(0.50), accent.opacity(0.90)]
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.primary.opacity(0.07))
                 Capsule()
                     .fill(
                         LinearGradient(
-                            colors: [
-                                accent.opacity(0.50),
-                                accent.opacity(0.90)
-                            ],
+                            colors: barColors,
                             startPoint: .leading,
                             endPoint: .trailing
                         )
