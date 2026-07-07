@@ -31,33 +31,33 @@ struct DashboardView: View {
             )
             .ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
-                    header
-                    quotaGrid
-                    footer
-                }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 26)
+            // 内容直接撑开，不使用 ScrollView，让高度自动适配
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                quotaGrid
+                footer
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
         }
+        // 固定宽度 360，高度由内容自然撑起
+        .frame(width: 400)
+        .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(.primary)
     }
 
     private var header: some View {
         HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Codex Quota")
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.system(size: 20, weight: .semibold))
                 Text(lastUpdatedText)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            HStack(spacing: 8) {
-                refreshButton
-                settingsButton
-            }
+            // 设置入口暂时隐藏，只保留刷新按钮
+            refreshButton
         }
     }
 
@@ -65,23 +65,28 @@ struct DashboardView: View {
         Button {
             store.refresh(reason: "main-window")
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(store.isRefreshing ? "刷新中" : "刷新")
-                    .font(.system(size: 13, weight: .semibold))
+            ZStack {
+                if store.isRefreshing {
+                    // 刷新中：旋转 loading 动画
+                    ProgressView()
+                        .controlSize(.small)
+                        .progressViewStyle(.circular)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .semibold))
+                }
             }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 8)
+            .frame(width: 32, height: 32)
             .background(
-                Capsule()
+                Circle()
                     .fill(.white.opacity(colorScheme == .dark ? 0.10 : 0.54))
-                    .background(.thinMaterial, in: Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(colorScheme == .dark ? 0.12 : 0.70), lineWidth: 0.8))
+                    .background(.thinMaterial, in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(colorScheme == .dark ? 0.12 : 0.70), lineWidth: 0.8))
             )
         }
         .buttonStyle(.plain)
         .disabled(store.isRefreshing)
+        .help("刷新额度")
     }
 
     private var settingsButton: some View {
@@ -376,7 +381,7 @@ struct QuotaCardView: View {
             .padding(.top, 4)
         }
         .padding(14)
-        .background(GlassPanelBackground(cornerRadius: 8, material: .contentBackground, tintOpacity: 0.28, strokeOpacity: 0.26))
+        .background(GlassPanelBackground(cornerRadius: 6, material: .contentBackground, tintOpacity: 0.28, strokeOpacity: 0.26))
     }
 
     private var remainingDurationText: String {

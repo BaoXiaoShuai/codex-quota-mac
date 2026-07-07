@@ -2,14 +2,26 @@
 import AppKit
 // SwiftUI 状态订阅能力
 import Combine
+// SwiftUI 界面框架
+import SwiftUI
 
 final class StatusBarController: NSObject {
-    var onOpenMainWindow: (() -> Void)?
-
     private let store: QuotaStore
     private let statusItem: NSStatusItem
     private var menu = NSMenu()
     private var cancellables = Set<AnyCancellable>()
+
+    /// 弹出面板，内嵌 DashboardView，懒加载避免启动时初始化 SwiftUI 树。
+    private lazy var popover: NSPopover = {
+        let p = NSPopover()
+        p.contentViewController = NSHostingController(rootView: DashboardView(store: store))
+        // 宽度与 DashboardView 一致，高度由 NSHostingController 根据内容自动计算
+        p.contentSize = NSSize(width: 360, height: 100)
+        // 点击面板外部自动关闭
+        p.behavior = .transient
+        p.animates = true
+        return p
+    }()
 
     /// 创建 macOS 状态栏控制器。
     /// - Parameter store: 额度状态仓库。
@@ -24,12 +36,10 @@ final class StatusBarController: NSObject {
 
     /// 配置状态栏按钮的基础行为。
     private func configureStatusItem() {
-        guard let button = statusItem.button else {
-            return
-        }
+        guard let button = statusItem.button else { return }
         button.title = "Codex"
         button.target = self
-        button.action = #selector(openMainWindow)
+        button.action = #selector(handleClick)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.toolTip = "Codex Quota Mac"
     }
@@ -65,7 +75,6 @@ final class StatusBarController: NSObject {
     /// 重建右键菜单，保持配置状态与当前设置一致。
     private func rebuildMenu() {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "打开主界面", action: #selector(openMainWindow), keyEquivalent: "o", target: self))
         menu.addItem(NSMenuItem(title: "刷新额度", action: #selector(refreshQuota), keyEquivalent: "r", target: self))
         menu.addItem(.separator())
 
@@ -89,13 +98,26 @@ final class StatusBarController: NSObject {
         self.menu = menu
     }
 
-    /// 打开主界面。
-    @objc private func openMainWindow() {
-        if NSApp.currentEvent?.type == .rightMouseUp {
+    /// 处理状态栏点击：左键切换 Popover 显隐，右键弹出菜单。
+    @objc private func handleClick() {
+        guard let event = NSApp.currentEvent else { return }
+        if event.type == .rightMouseUp {
             statusItem.popUpMenu(menu)
             return
         }
-        onOpenMainWindow?()
+        togglePopover()
+    }
+
+    /// 切换 Popover 显隐，显示时定位到状态栏按钮正下方。
+    private func togglePopover() {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // 确保 Popover 窗口获得焦点，可接受键盘输入
+            popover.contentViewController?.view.window?.makeKey()
+        }
     }
 
     /// 手动刷新额度。
