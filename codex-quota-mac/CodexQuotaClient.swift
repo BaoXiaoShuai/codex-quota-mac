@@ -6,6 +6,7 @@ enum CodexQuotaClientError: LocalizedError {
     case launchFailed(String)
     case timeout(String)
     case invalidResponse
+    case missingDashboardData
     case missingQuota
     case invalidWindow
 
@@ -19,6 +20,8 @@ enum CodexQuotaClientError: LocalizedError {
             return "Codex 请求超时：\(method)"
         case .invalidResponse:
             return "Codex 返回了无法解析的数据。"
+        case .missingDashboardData:
+            return "Codex 未返回账号、Token 用量或额度数据。"
         case .missingQuota:
             return "Codex 未返回可用的额度窗口。"
         case .invalidWindow:
@@ -29,19 +32,26 @@ enum CodexQuotaClientError: LocalizedError {
 
 final class CodexQuotaClient {
     private let timeoutSeconds: TimeInterval
+    private let localUsageReader: LocalCodexUsageReader
 
     /// 创建 Codex 额度读取客户端。
-    /// - Parameter timeoutSeconds: 单次 JSON-RPC 请求等待秒数。
-    init(timeoutSeconds: TimeInterval = 12) {
+    /// - Parameters:
+    ///   - timeoutSeconds: 单次 JSON-RPC 请求等待秒数。
+    ///   - localUsageReader: 本机 Codex 会话 Token 读取器。
+    init(
+        timeoutSeconds: TimeInterval = 12,
+        localUsageReader: LocalCodexUsageReader = LocalCodexUsageReader()
+    ) {
         self.timeoutSeconds = timeoutSeconds
+        self.localUsageReader = localUsageReader
     }
 
-    /// 调用本机 Codex app-server 读取额度快照。
-    /// - Parameter completion: 返回规范化后的额度快照或错误。
-    func fetchQuota(completion: @escaping (Result<QuotaSnapshot, Error>) -> Void) {
+    /// 调用本机 Codex app-server 读取账号、Token 用量和额度快照。
+    /// - Parameter completion: 返回规范化后的仪表盘快照或错误。
+    func fetchDashboard(completion: @escaping (Result<CodexDashboardSnapshot, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let snapshot = try self.readQuota()
+                let snapshot = try self.readDashboard()
                 DispatchQueue.main.async {
                     completion(.success(snapshot))
                 }
@@ -53,9 +63,9 @@ final class CodexQuotaClient {
         }
     }
 
-    /// 执行 Codex JSON-RPC 初始化和额度读取流程。
-    /// - Returns: 规范化后的额度快照。
-    private func readQuota() throws -> QuotaSnapshot {
+    /// 执行 Codex JSON-RPC 初始化和仪表盘数据读取流程。
+    /// - Returns: 规范化后的账号、Token 用量和额度快照。
+    private func readDashboard() throws -> CodexDashboardSnapshot {
         guard let codexPath = resolvedCodexPath() else {
             throw CodexQuotaClientError.codexUnavailable
         }
@@ -108,22 +118,51 @@ final class CodexQuotaClient {
         )
         _ = try collector.waitForResponse(id: 1, method: "initialize", timeoutSeconds: timeoutSeconds)
 
-        try send(id: 2, method: "account/rateLimits/read", params: nil, to: stdin)
-        let result = try collector.waitForResponse(
+        try send(id: 2, method: "account/read", params: ["refreshToken": false], to: stdin)
+        try send(id: 3, method: "account/usage/read", params: nil, to: stdin)
+        try send(id: 4, method: "account/rateLimits/read", params: nil, to: stdin)
+
+        let accountResponse = try? collector.waitForResponse(
             id: 2,
+            method: "account/read",
+            timeoutSeconds: timeoutSeconds
+        )
+        let usageResponse = try? collector.waitForResponse(
+            id: 3,
+            method: "account/usage/read",
+            timeoutSeconds: timeoutSeconds
+        )
+        let quotaResponse = try? collector.waitForResponse(
+            id: 4,
             method: "account/rateLimits/read",
             timeoutSeconds: timeoutSeconds
         )
 
-        if let errorMessage = result["error"] as? [String: Any],
-           let message = errorMessage["message"] as? String {
-            throw CodexQuotaClientError.launchFailed(message)
+        let account = resultPayload(from: accountResponse).flatMap(normalizeAccountPayload)
+        let officialTokenUsage = resultPayload(from: usageResponse).flatMap(normalizeTokenUsagePayload)
+        let localTokenUsage = localUsageReader.readToday()
+        let tokenUsage = localTokenUsage?.merging(into: officialTokenUsage) ?? officialTokenUsage
+        let quota = resultPayload(from: quotaResponse).flatMap { payload in
+            try? normalizeQuotaPayload(payload)
         }
 
-        guard let payload = result["result"] as? [String: Any] else {
-            throw CodexQuotaClientError.invalidResponse
+        // 三类数据相互独立：单个接口不可用时保留其余已读取内容，全部为空才视为失败。
+        guard account != nil || tokenUsage != nil || quota != nil else {
+            let message = [accountResponse, usageResponse, quotaResponse]
+                .compactMap(rpcErrorMessage)
+                .first
+            if let message {
+                throw CodexQuotaClientError.launchFailed(message)
+            }
+            throw CodexQuotaClientError.missingDashboardData
         }
-        return try normalizeQuotaPayload(payload)
+
+        return CodexDashboardSnapshot(
+            account: account,
+            tokenUsage: tokenUsage,
+            quota: quota,
+            fetchedAt: Date()
+        )
     }
 
     /// 配置 Codex app-server 的启动路径。
@@ -144,7 +183,7 @@ final class CodexQuotaClient {
         let environment = ProcessInfo.processInfo.environment
         let fixedCandidates = [
             environment["CODEX_CLI_PATH"],
-            "/Applications/Codex.app/Contents/Resources/codex",
+            "/Applications/ChatGPT.app/Contents/Resources/codex",
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
             "\(NSHomeDirectory())/.npm-global/bin/codex",
@@ -178,26 +217,81 @@ final class CodexQuotaClient {
         pipe.fileHandleForWriting.write(Data("\n".utf8))
     }
 
+    /// 提取 JSON-RPC 成功响应中的 result 对象。
+    /// - Parameter response: JSON-RPC 原始响应。
+    /// - Returns: result 字典；响应为空或失败时返回 nil。
+    private func resultPayload(from response: [String: Any]?) -> [String: Any]? {
+        response?["result"] as? [String: Any]
+    }
+
+    /// 提取 JSON-RPC 错误文案。
+    /// - Parameter response: JSON-RPC 原始响应。
+    /// - Returns: 服务端错误文案；不存在时返回 nil。
+    private func rpcErrorMessage(from response: [String: Any]?) -> String? {
+        let error = response?["error"] as? [String: Any]
+        return error?["message"] as? String
+    }
+
+    /// 将 account/read 返回转换为账号信息。
+    /// - Parameter payload: account/read 返回数据。
+    /// - Returns: 当前账号信息；未登录时返回 nil。
+    private func normalizeAccountPayload(_ payload: [String: Any]) -> CodexAccount? {
+        guard let account = payload["account"] as? [String: Any],
+              let type = account["type"] as? String else {
+            return nil
+        }
+        return CodexAccount(
+            type: type,
+            email: account["email"] as? String,
+            planType: account["planType"] as? String
+        )
+    }
+
+    /// 将 account/usage/read 返回转换为每日与累计 Token 数据。
+    /// - Parameter payload: account/usage/read 返回数据。
+    /// - Returns: Token 用量信息；响应结构不完整时返回 nil。
+    private func normalizeTokenUsagePayload(_ payload: [String: Any]) -> AccountTokenUsage? {
+        guard let summaryPayload = payload["summary"] as? [String: Any] else {
+            return nil
+        }
+
+        let buckets = (payload["dailyUsageBuckets"] as? [[String: Any]] ?? []).compactMap { bucket -> TokenUsageDailyBucket? in
+            guard let startDate = bucket["startDate"] as? String,
+                  let tokens = integerValue(bucket["tokens"]) else {
+                return nil
+            }
+            return TokenUsageDailyBucket(startDate: startDate, tokens: tokens)
+        }
+
+        let summary = AccountTokenUsageSummary(
+            currentStreakDays: integerValue(summaryPayload["currentStreakDays"]),
+            lifetimeTokens: integerValue(summaryPayload["lifetimeTokens"]),
+            longestRunningTurnSec: integerValue(summaryPayload["longestRunningTurnSec"]),
+            longestStreakDays: integerValue(summaryPayload["longestStreakDays"]),
+            peakDailyTokens: integerValue(summaryPayload["peakDailyTokens"])
+        )
+        return AccountTokenUsage(dailyUsageBuckets: buckets, summary: summary)
+    }
+
     /// 将 Codex 原始返回转换为应用内部快照。
     /// - Parameter payload: account/rateLimits/read 返回数据。
     /// - Returns: 规范化后的额度快照。
     private func normalizeQuotaPayload(_ payload: [String: Any]) throws -> QuotaSnapshot {
-        guard let limits = payload["rateLimitsByLimitId"] as? [String: Any],
-              let codex = limits["codex"] as? [String: Any] else {
+        guard let quota = payload["rateLimits"] as? [String: Any] else {
             throw CodexQuotaClientError.missingQuota
         }
 
-        let primary = try normalizeWindow(codex["primary"])
-        let secondary = try normalizeWindow(codex["secondary"])
+        let primary = try normalizeWindow(quota["primary"])
+        let secondary = try normalizeWindow(quota["secondary"])
         guard let activeWindow = primary ?? secondary else {
             throw CodexQuotaClientError.missingQuota
         }
 
         return QuotaSnapshot(
-            limitId: codex["limitId"] as? String ?? "codex",
-            limitName: codex["limitName"] as? String ?? "Codex",
-            planType: codex["planType"] as? String ?? "unknown",
-            reachedType: codex["rateLimitReachedType"] as? String,
+            limitId: quota["limitId"] as? String ?? "codex",
+            limitName: quota["limitName"] as? String ?? "Codex",
+            planType: quota["planType"] as? String ?? "unknown",
+            reachedType: quota["rateLimitReachedType"] as? String,
             primary: primary,
             secondary: secondary,
             remainingPercent: activeWindow.remainingPercent,
@@ -238,6 +332,19 @@ final class CodexQuotaClient {
         }
         if let string = value as? String {
             return Double(string)
+        }
+        return nil
+    }
+
+    /// 从 JSON 动态值提取 Int64。
+    /// - Parameter value: JSONSerialization 解析后的任意值。
+    /// - Returns: 可转换时返回 Int64，否则返回 nil。
+    private func integerValue(_ value: Any?) -> Int64? {
+        if let number = value as? NSNumber {
+            return number.int64Value
+        }
+        if let string = value as? String {
+            return Int64(string)
         }
         return nil
     }

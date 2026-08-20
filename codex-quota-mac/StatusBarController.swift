@@ -14,9 +14,10 @@ final class StatusBarController: NSObject {
     /// 弹出面板，内嵌 DashboardView，懒加载避免启动时初始化 SwiftUI 树。
     private lazy var popover: NSPopover = {
         let p = NSPopover()
-        p.contentViewController = NSHostingController(rootView: DashboardView(store: store))
-        // 宽度与 DashboardView 一致，高度由 NSHostingController 根据内容自动计算
-        p.contentSize = NSSize(width: 360, height: 100)
+        let hostingController = NSHostingController(rootView: DashboardView(store: store))
+        p.contentViewController = hostingController
+        hostingController.view.layoutSubtreeIfNeeded()
+        p.contentSize = NSSize(width: 420, height: hostingController.view.fittingSize.height)
         // 点击面板外部自动关闭
         p.behavior = .transient
         p.animates = true
@@ -75,18 +76,22 @@ final class StatusBarController: NSObject {
     /// 重建右键菜单，保持配置状态与当前设置一致。
     private func rebuildMenu() {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "刷新额度", action: #selector(refreshQuota), keyEquivalent: "r", target: self))
+        menu.addItem(NSMenuItem(title: "刷新数据", action: #selector(refreshQuota), keyEquivalent: "r", target: self))
         menu.addItem(.separator())
 
-        let fiveHourItem = NSMenuItem(title: "显示 5 小时额度", action: #selector(toggleFiveHour), keyEquivalent: "")
-        fiveHourItem.target = self
-        fiveHourItem.state = store.settings.showFiveHour ? .on : .off
-        menu.addItem(fiveHourItem)
+        if store.snapshot?.fiveHourWindow != nil {
+            let fiveHourItem = NSMenuItem(title: "显示 5 小时额度", action: #selector(toggleFiveHour), keyEquivalent: "")
+            fiveHourItem.target = self
+            fiveHourItem.state = store.settings.showFiveHour ? .on : .off
+            menu.addItem(fiveHourItem)
+        }
 
-        let weeklyItem = NSMenuItem(title: "显示 7 天额度", action: #selector(toggleWeekly), keyEquivalent: "")
-        weeklyItem.target = self
-        weeklyItem.state = store.settings.showWeekly ? .on : .off
-        menu.addItem(weeklyItem)
+        if store.snapshot?.weeklyWindow != nil {
+            let weeklyItem = NSMenuItem(title: "显示 7 天额度", action: #selector(toggleWeekly), keyEquivalent: "")
+            weeklyItem.target = self
+            weeklyItem.state = store.settings.showWeekly ? .on : .off
+            menu.addItem(weeklyItem)
+        }
 
         // 重置时间开关：5h 显示 HH:mm，7d 显示 M/d
         let resetTimeItem = NSMenuItem(title: "显示重置时间", action: #selector(toggleResetTime), keyEquivalent: "")
@@ -136,10 +141,24 @@ final class StatusBarController: NSObject {
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            resizePopoverToFit()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             // 确保 Popover 窗口获得焦点，可接受键盘输入
             popover.contentViewController?.view.window?.makeKey()
         }
+    }
+
+    /// 按当前仪表盘内容计算弹窗高度，避免内部滚动或内容裁切。
+    private func resizePopoverToFit() {
+        guard let contentView = popover.contentViewController?.view else {
+            return
+        }
+        contentView.layoutSubtreeIfNeeded()
+        let fittingHeight = contentView.fittingSize.height
+        guard fittingHeight > 0 else {
+            return
+        }
+        popover.contentSize = NSSize(width: 420, height: fittingHeight)
     }
 
     /// 手动刷新额度。

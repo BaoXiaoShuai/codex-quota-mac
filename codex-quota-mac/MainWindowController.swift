@@ -14,8 +14,9 @@ final class MainWindowController: NSWindowController {
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Codex Quota Mac"
-        window.setContentSize(NSSize(width: 480, height: 560))
-        window.minSize = NSSize(width: 430, height: 500)
+        hostingController.view.layoutSubtreeIfNeeded()
+        window.setContentSize(NSSize(width: 420, height: hostingController.view.fittingSize.height))
+        window.minSize = NSSize(width: 420, height: 0)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
@@ -32,8 +33,22 @@ final class MainWindowController: NSWindowController {
     /// 展示窗口并居中到当前屏幕。
     /// - Parameter sender: 触发展示的对象。
     override func showWindow(_ sender: Any?) {
+        resizeWindowToFit()
         super.showWindow(sender)
         window?.center()
         window?.makeKeyAndOrderFront(sender)
+    }
+
+    /// 按当前仪表盘内容重新计算主窗口高度。
+    private func resizeWindowToFit() {
+        guard let contentView = contentViewController?.view else {
+            return
+        }
+        contentView.layoutSubtreeIfNeeded()
+        let fittingHeight = contentView.fittingSize.height
+        guard fittingHeight > 0 else {
+            return
+        }
+        window?.setContentSize(NSSize(width: 420, height: fittingHeight))
     }
 }

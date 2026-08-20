@@ -6,6 +6,10 @@ import Foundation
 final class QuotaStore: ObservableObject {
     // 当前读取状态。
     @Published private(set) var status: QuotaLoadStatus = .idle
+    // 当前 Codex 账号信息。
+    @Published private(set) var account: CodexAccount?
+    // 当前每日与累计 Token 用量。
+    @Published private(set) var tokenUsage: AccountTokenUsage?
     // 当前额度快照。
     @Published private(set) var snapshot: QuotaSnapshot?
     // 当前节奏分析结果。
@@ -59,16 +63,29 @@ final class QuotaStore: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// 从本地缓存读取上次额度快照。
+    /// 从本地缓存读取上次账号、Token 用量和额度快照。
     func loadCache() {
-        guard let data = try? Data(contentsOf: cacheURL),
-              let payload = try? JSONDecoder.codexQuota.decode(QuotaCachePayload.self, from: data) else {
+        guard let data = try? Data(contentsOf: cacheURL) else {
             return
         }
-        snapshot = payload.quota
-        lastUpdatedAt = payload.savedAt
-        status = .ready
-        pace = QuotaAnalyzer.analyze(snapshot: payload.quota)
+
+        if let payload = try? JSONDecoder.codexQuota.decode(DashboardCachePayload.self, from: data) {
+            account = payload.account
+            tokenUsage = payload.tokenUsage
+            snapshot = payload.quota
+            lastUpdatedAt = payload.savedAt
+            status = .ready
+            pace = QuotaAnalyzer.analyze(snapshot: payload.quota)
+            return
+        }
+
+        // 兼容旧版仅包含额度的数据缓存，升级后首次刷新会写入完整结构。
+        if let payload = try? JSONDecoder.codexQuota.decode(QuotaCachePayload.self, from: data) {
+            snapshot = payload.quota
+            lastUpdatedAt = payload.savedAt
+            status = .ready
+            pace = QuotaAnalyzer.analyze(snapshot: payload.quota)
+        }
     }
 
     /// 开启自动刷新定时器。
@@ -82,7 +99,7 @@ final class QuotaStore: ObservableObject {
         refreshTimer = nil
     }
 
-    /// 手动或自动刷新 Codex 额度。
+    /// 手动或自动刷新 Codex 账号、Token 用量和额度。
     /// - Parameter reason: 刷新来源，用于调试定位。
     func refresh(reason: String = "manual") {
         if isRefreshing {
@@ -90,20 +107,31 @@ final class QuotaStore: ObservableObject {
         }
 
         isRefreshing = true
-        status = snapshot == nil ? .loading : .ready
-        client.fetchQuota { [weak self] result in
+        status = hasDashboardData ? .ready : .loading
+        client.fetchDashboard { [weak self] result in
             guard let self else {
                 return
             }
             self.isRefreshing = false
             switch result {
-            case let .success(snapshot):
-                self.snapshot = snapshot
-                self.lastUpdatedAt = snapshot.fetchedAt
+            case let .success(dashboard):
+                // 三个接口独立刷新：单个接口暂时失败时保留上一份有效数据，避免界面突然清空。
+                let mergedDashboard = CodexDashboardSnapshot(
+                    account: dashboard.account ?? self.account,
+                    tokenUsage: dashboard.tokenUsage ?? self.tokenUsage,
+                    quota: dashboard.quota ?? self.snapshot,
+                    fetchedAt: dashboard.fetchedAt
+                )
+                self.account = mergedDashboard.account
+                self.tokenUsage = mergedDashboard.tokenUsage
+                self.snapshot = mergedDashboard.quota
+                self.lastUpdatedAt = mergedDashboard.fetchedAt
                 self.status = .ready
-                self.pace = QuotaAnalyzer.analyze(snapshot: snapshot)
-                self.saveCache(snapshot)
-                self.recordHistory(snapshot)
+                self.pace = QuotaAnalyzer.analyze(snapshot: mergedDashboard.quota)
+                self.saveCache(mergedDashboard)
+                if let quota = dashboard.quota {
+                    self.recordHistory(quota)
+                }
             case let .failure(error):
                 self.status = .failed(error.localizedDescription)
             }
@@ -168,11 +196,23 @@ final class QuotaStore: ObservableObject {
         }
     }
 
-    /// 保存最新额度缓存。
-    /// - Parameter snapshot: 最新额度快照。
-    private func saveCache(_ snapshot: QuotaSnapshot) {
-        let payload = QuotaCachePayload(version: 1, savedAt: Date(), quota: snapshot)
+    /// 保存最新仪表盘缓存。
+    /// - Parameter snapshot: 最新账号、Token 用量和额度快照。
+    private func saveCache(_ snapshot: CodexDashboardSnapshot) {
+        let payload = DashboardCachePayload(
+            version: 2,
+            savedAt: snapshot.fetchedAt,
+            account: snapshot.account,
+            tokenUsage: snapshot.tokenUsage,
+            quota: snapshot.quota
+        )
         writeJSON(payload, to: cacheURL)
+    }
+
+    /// 判断当前是否已有任一类可展示数据。
+    /// - Returns: 账号、Token 用量或额度任一存在时返回 true。
+    private var hasDashboardData: Bool {
+        account != nil || tokenUsage != nil || snapshot != nil
     }
 
     /// 记录额度历史样本，demo 保留最近 14 天。
