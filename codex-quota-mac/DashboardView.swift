@@ -109,7 +109,7 @@ struct DashboardView: View {
 
     private var refreshButton: some View {
         Button {
-            store.refresh(reason: "main-window")
+            store.refresh(reason: "main-window", force: true)
         } label: {
             ZStack {
                 if store.isRefreshing {
@@ -318,6 +318,7 @@ struct DashboardView: View {
                     subtitle: resetText(for: weekly),
                     iconName: "calendar",
                     window: weekly,
+                    pace: store.pace.weekly,
                     accent: TelemetryPalette.ionBlue,
                     store: store
                 )
@@ -330,6 +331,7 @@ struct DashboardView: View {
                     subtitle: resetText(for: fiveHour),
                     iconName: "clock.fill",
                     window: fiveHour,
+                    pace: store.pace.fiveHour,
                     accent: TelemetryPalette.signalLime,
                     store: store
                 )
@@ -1235,6 +1237,8 @@ struct QuotaCardView: View {
     let iconName: String
     // 额度窗口。
     let window: QuotaWindow?
+    // 当前额度窗口的使用节奏分析。
+    let pace: QuotaWindowPace?
     // 进度强调色。
     let accent: Color
     // 额度状态仓库。
@@ -1292,6 +1296,44 @@ struct QuotaCardView: View {
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundStyle(accent.opacity(0.86))
             }
+
+            if let paceStatusText {
+                VStack(spacing: 8) {
+                    Rectangle()
+                        .fill(accent.opacity(0.10))
+                        .frame(height: 1)
+
+                    HStack(spacing: 10) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(paceStatusColor)
+                                .frame(width: 6, height: 6)
+                            Text(paceStatusText)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(paceStatusColor)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(paceStatusColor.opacity(0.09))
+                        )
+
+                        Spacer()
+
+                        if let idealRemainingText {
+                            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                                Text("理想剩余")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(TelemetryPalette.mutedText)
+                                Text(idealRemainingText)
+                                    .font(.system(size: 15, weight: .heavy, design: .monospaced))
+                                    .foregroundStyle(accent)
+                            }
+                        }
+                    }
+                }
+            }
         }
         .padding(12)
         .background(
@@ -1321,6 +1363,38 @@ struct QuotaCardView: View {
         return "约 \(minutes) 分钟"
     }
 
+    /// 返回当前额度窗口的节奏状态文案。
+    /// - Returns: 当前节奏状态；无法分析时返回 nil。
+    private var paceStatusText: String? {
+        guard let pace, pace.status != .unknown else {
+            return nil
+        }
+        return pace.status.title
+    }
+
+    /// 返回当前额度窗口的理想剩余百分比。
+    /// - Returns: 已格式化的理想剩余值；无法计算时返回 nil。
+    private var idealRemainingText: String? {
+        guard let idealRemainingPercent = pace?.idealRemainingPercent else {
+            return nil
+        }
+        return store.formatPercent(idealRemainingPercent)
+    }
+
+    /// 返回当前节奏状态对应的提示颜色。
+    /// - Returns: 正常为绿色、偏快为橙色、临界为红色。
+    private var paceStatusColor: Color {
+        switch pace?.status {
+        case .accelerate, .normal:
+            return TelemetryPalette.signalLime
+        case .recentFast, .slow:
+            return TelemetryPalette.warningAmber
+        case .critical:
+            return .red
+        case .unknown, .none:
+            return TelemetryPalette.mutedText
+        }
+    }
 }
 
 struct QuotaProgressView: View {

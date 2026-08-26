@@ -99,6 +99,11 @@ final class StatusBarController: NSObject {
         resetTimeItem.state = store.settings.showResetTime ? .on : .off
         menu.addItem(resetTimeItem)
 
+        let summaryItem = NSMenuItem(title: "显示综合状态", action: #selector(toggleSummary), keyEquivalent: "")
+        summaryItem.target = self
+        summaryItem.state = store.settings.showSummary ? .on : .off
+        menu.addItem(summaryItem)
+
         menu.addItem(.separator())
 
         // 刷新间隔子菜单
@@ -165,7 +170,7 @@ final class StatusBarController: NSObject {
 
     /// 手动刷新额度。
     @objc private func refreshQuota() {
-        store.refresh(reason: "status-menu")
+        store.refresh(reason: "status-menu", force: true)
     }
 
     /// 切换 5 小时额度状态栏展示。

@@ -12,6 +12,8 @@ final class QuotaStore: ObservableObject {
     @Published private(set) var tokenUsage: AccountTokenUsage?
     // 当前额度快照。
     @Published private(set) var snapshot: QuotaSnapshot?
+    // 最近额度历史样本，用于控制本地采样频率。
+    private var quotaHistory: [QuotaSnapshot] = []
     // 当前节奏分析结果。
     @Published private(set) var pace = QuotaPace(fiveHour: nil, weekly: nil, summary: .unknown)
     // 最近更新时间。
@@ -26,6 +28,8 @@ final class QuotaStore: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let cacheURL: URL
     private let historyURL: URL
+    private let historySamplingInterval: TimeInterval = 5 * 60
+    private let refreshFreshnessInterval: TimeInterval = 45
 
     // 5h 重置时间格式：HH:mm
     private let fiveHourTimeFormatter: DateFormatter = {
@@ -65,6 +69,7 @@ final class QuotaStore: ObservableObject {
 
     /// 从本地缓存读取上次账号、Token 用量和额度快照。
     func loadCache() {
+        loadHistory()
         guard let data = try? Data(contentsOf: cacheURL) else {
             return
         }
@@ -99,10 +104,18 @@ final class QuotaStore: ObservableObject {
         refreshTimer = nil
     }
 
-    /// 手动或自动刷新 Codex 账号、Token 用量和额度。
-    /// - Parameter reason: 刷新来源，用于调试定位。
-    func refresh(reason: String = "manual") {
+    /// 刷新 Codex 账号、Token 用量和额度，并跳过短时间内的重复后台请求。
+    /// - Parameters:
+    ///   - reason: 刷新来源，用于调试定位。
+    ///   - force: 是否忽略数据新鲜度并立即刷新。
+    func refresh(reason: String = "manual", force: Bool = false) {
         if isRefreshing {
+            return
+        }
+        // 打开面板和自动任务共享新鲜度限制；启动和用户手动操作通过 force 强制刷新。
+        if !force,
+           let lastUpdatedAt,
+           Date().timeIntervalSince(lastUpdatedAt) < refreshFreshnessInterval {
             return
         }
 
@@ -168,6 +181,10 @@ final class QuotaStore: ObservableObject {
                 text += " \(weeklyDateFormatter.string(from: d))"
             }
             parts.append(text)
+        }
+
+        if settings.showSummary, pace.summary != .unknown {
+            parts.append(pace.summary.title)
         }
 
         if parts.isEmpty {
@@ -265,22 +282,64 @@ final class QuotaStore: ObservableObject {
         account != nil || tokenUsage != nil || snapshot != nil
     }
 
-    /// 记录额度历史样本，demo 保留最近 14 天。
+    /// 从本地读取最近 14 天额度历史样本。
+    private func loadHistory() {
+        guard let data = try? Data(contentsOf: historyURL),
+              let payload = try? JSONDecoder.codexQuota.decode(QuotaHistoryPayload.self, from: data) else {
+            return
+        }
+        let cutoff = Date().addingTimeInterval(-14 * 24 * 60 * 60)
+        quotaHistory = payload.samples
+            .filter { $0.fetchedAt >= cutoff }
+            .sorted { $0.fetchedAt < $1.fetchedAt }
+    }
+
+    /// 记录额度历史样本，按 5 分钟采样并在额度变化时立即追加。
     /// - Parameter snapshot: 最新额度快照。
     private func recordHistory(_ snapshot: QuotaSnapshot) {
-        var samples: [QuotaSnapshot] = []
-        if let data = try? Data(contentsOf: historyURL),
-           let payload = try? JSONDecoder.codexQuota.decode(QuotaHistoryPayload.self, from: data) {
-            samples = payload.samples
-        }
-
         let cutoff = Date().addingTimeInterval(-14 * 24 * 60 * 60)
-        samples = samples.filter { $0.fetchedAt >= cutoff && $0.fetchedAt != snapshot.fetchedAt }
+        var samples = quotaHistory.filter { $0.fetchedAt >= cutoff && $0.fetchedAt != snapshot.fetchedAt }
+        if let latest = samples.last {
+            let elapsed = snapshot.fetchedAt.timeIntervalSince(latest.fetchedAt)
+            // 未达到采样间隔且额度、重置周期都没有变化时，不重复写入相同状态。
+            if elapsed < historySamplingInterval, !hasQuotaChanged(from: latest, to: snapshot) {
+                quotaHistory = samples
+                return
+            }
+        }
         samples.append(snapshot)
         samples = Array(samples.suffix(4096))
+        quotaHistory = samples
 
         let payload = QuotaHistoryPayload(version: 1, samples: samples)
         writeJSON(payload, to: historyURL)
+    }
+
+    /// 判断两个额度快照的窗口用量或重置周期是否发生变化。
+    /// - Parameters:
+    ///   - previous: 上一个已记录额度快照。
+    ///   - current: 当前额度快照。
+    /// - Returns: 任一额度窗口发生有效变化时返回 true。
+    private func hasQuotaChanged(from previous: QuotaSnapshot, to current: QuotaSnapshot) -> Bool {
+        quotaWindowChanged(previous.fiveHourWindow, current.fiveHourWindow)
+            || quotaWindowChanged(previous.weeklyWindow, current.weeklyWindow)
+    }
+
+    /// 判断单个额度窗口是否发生有效变化。
+    /// - Parameters:
+    ///   - previous: 上一个额度窗口。
+    ///   - current: 当前额度窗口。
+    /// - Returns: 窗口新增、移除、用量变化或重置周期变化时返回 true。
+    private func quotaWindowChanged(_ previous: QuotaWindow?, _ current: QuotaWindow?) -> Bool {
+        if (previous == nil) != (current == nil) {
+            return true
+        }
+        guard let previous, let current else {
+            return false
+        }
+        // 同时比较用量和重置时间，覆盖额度消耗与新周期开始两类变化。
+        return abs(previous.usedPercent - current.usedPercent) >= 0.1
+            || previous.resetsAt != current.resetsAt
     }
 
     /// 写入 JSON 文件并自动创建父目录。

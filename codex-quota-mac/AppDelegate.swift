@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusBarController = StatusBarController(store: store)
         store.loadCache()
         store.startAutoRefresh()
-        store.refresh(reason: "startup")
+        store.refresh(reason: "startup", force: true)
     }
 
     /// 应用退出前停止定时刷新任务。
