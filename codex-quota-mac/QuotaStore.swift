@@ -115,10 +115,10 @@ final class QuotaStore: ObservableObject {
             self.isRefreshing = false
             switch result {
             case let .success(dashboard):
-                // 三个接口独立刷新：单个接口暂时失败时保留上一份有效数据，避免界面突然清空。
+                // 三个接口独立刷新，Token 日期桶还需与本地历史逐日合并，避免不完整响应清空月历。
                 let mergedDashboard = CodexDashboardSnapshot(
                     account: dashboard.account ?? self.account,
-                    tokenUsage: dashboard.tokenUsage ?? self.tokenUsage,
+                    tokenUsage: self.mergeTokenUsage(cached: self.tokenUsage, fresh: dashboard.tokenUsage),
                     quota: dashboard.quota ?? self.snapshot,
                     fetchedAt: dashboard.fetchedAt
                 )
@@ -194,6 +194,56 @@ final class QuotaStore: ObservableObject {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: minutes * 60, repeats: true) { [weak self] _ in
             self?.refresh(reason: "scheduled")
         }
+    }
+
+    /// 将实时 Token 数据按日期合入本地缓存，保留接口本次未返回的历史记录。
+    /// - Parameters:
+    ///   - cached: 本地已缓存的完整 Token 数据。
+    ///   - fresh: 本次接口及本地会话读取到的最新 Token 数据。
+    /// - Returns: 历史日期不丢失、当天数据持续更新的合并结果。
+    private func mergeTokenUsage(
+        cached: AccountTokenUsage?,
+        fresh: AccountTokenUsage?
+    ) -> AccountTokenUsage? {
+        guard let fresh else {
+            return cached
+        }
+        guard let cached else {
+            return fresh
+        }
+
+        var tokensByDate: [String: Int64] = [:]
+        for bucket in cached.dailyUsageBuckets + fresh.dailyUsageBuckets {
+            let dateKey = String(bucket.startDate.prefix(10))
+            guard dateKey.count == 10 else {
+                continue
+            }
+            // 同一日期可能同时存在缓存、官方桶和本地实时值，取最大值避免刷新后倒退或消失。
+            tokensByDate[dateKey] = max(tokensByDate[dateKey] ?? 0, max(0, bucket.tokens))
+        }
+
+        let mergedBuckets = tokensByDate
+            .map { TokenUsageDailyBucket(startDate: $0.key, tokens: $0.value) }
+            .sorted { $0.startDate < $1.startDate }
+        let cachedSummary = cached.summary
+        let freshSummary = fresh.summary
+        let mergedSummary = AccountTokenUsageSummary(
+            currentStreakDays: freshSummary.currentStreakDays ?? cachedSummary.currentStreakDays,
+            lifetimeTokens: maximumValue(cachedSummary.lifetimeTokens, freshSummary.lifetimeTokens),
+            longestRunningTurnSec: maximumValue(cachedSummary.longestRunningTurnSec, freshSummary.longestRunningTurnSec),
+            longestStreakDays: maximumValue(cachedSummary.longestStreakDays, freshSummary.longestStreakDays),
+            peakDailyTokens: maximumValue(cachedSummary.peakDailyTokens, freshSummary.peakDailyTokens)
+        )
+        return AccountTokenUsage(dailyUsageBuckets: mergedBuckets, summary: mergedSummary)
+    }
+
+    /// 返回两个可选数值中的较大有效值。
+    /// - Parameters:
+    ///   - first: 已缓存数值。
+    ///   - second: 最新数值。
+    /// - Returns: 两者较大值；均为空时返回 nil。
+    private func maximumValue(_ first: Int64?, _ second: Int64?) -> Int64? {
+        [first, second].compactMap { $0 }.max()
     }
 
     /// 保存最新仪表盘缓存。

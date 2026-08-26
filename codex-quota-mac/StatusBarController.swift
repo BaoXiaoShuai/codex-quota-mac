@@ -141,6 +141,8 @@ final class StatusBarController: NSObject {
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            // 打开面板时立即同步，避免今日 Token 等到下一个自动刷新周期才出现。
+            store.refresh(reason: "status-popover")
             resizePopoverToFit()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             // 确保 Popover 窗口获得焦点，可接受键盘输入

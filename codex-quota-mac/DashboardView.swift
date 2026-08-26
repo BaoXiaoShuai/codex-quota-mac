@@ -27,8 +27,8 @@ private struct RecentTokenDay: Identifiable {
 
 private enum TelemetryPalette {
     static let canvas = Color(red: 0.95, green: 0.97, blue: 1.0)
-    static let panel = Color.white.opacity(0.48)
-    static let panelRaised = Color.white.opacity(0.76)
+    static let panel = Color(red: 0.985, green: 0.99, blue: 1.0).opacity(0.90)
+    static let panelRaised = Color.white.opacity(0.88)
     static let ionBlue = Color(red: 0.29, green: 0.48, blue: 0.98)
     static let electricViolet = Color(red: 0.48, green: 0.38, blue: 0.95)
     static let plasmaCyan = Color(red: 0.10, green: 0.66, blue: 0.75)
@@ -44,6 +44,8 @@ struct DashboardView: View {
     @ObservedObject var store: QuotaStore
     // 最近 7 天 Token 图表当前展示方式。
     @State private var recentChartMode: TokenChartMode = .bars
+    // 是否展示最近 7 天模块，当前暂时隐藏但保留完整实现。
+    private let isRecentTokenPanelVisible = false
 
     /// 创建主界面视图。
     /// - Parameter store: Codex 账号、Token 用量和额度状态仓库。
@@ -61,16 +63,18 @@ struct DashboardView: View {
                 // Codex 当前登录账号信息区域
                 accountPanel
 
-                // 最近 7 天 Token 柱状图或折线图区域
-                recentTokenPanel
+                // 最近 7 天模块暂时隐藏，保留视图与计算逻辑供后续恢复。
+                if isRecentTokenPanelVisible {
+                    recentTokenPanel
+                }
 
-                // 每日 Token 日历热力图与累计数据区域
-                tokenActivityPanel
-
-                // Codex 实际返回的额度窗口区域
+                // Codex 实际返回的额度窗口区域，优先展示在 Token 活动上方。
                 if hasQuotaWindow {
                     quotaSection
                 }
+
+                // 每日 Token 月历与累计数据区域
+                tokenActivityPanel
 
                 statusBanner
             }
@@ -93,7 +97,6 @@ struct DashboardView: View {
                     Circle()
                         .fill(store.isRefreshing ? TelemetryPalette.warningAmber : TelemetryPalette.signalLime)
                         .frame(width: 6, height: 6)
-                        .shadow(color: store.isRefreshing ? TelemetryPalette.warningAmber : TelemetryPalette.signalLime, radius: 2)
                     Text(store.isRefreshing ? "正在同步" : lastUpdatedText)
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(TelemetryPalette.mutedText)
@@ -145,7 +148,6 @@ struct DashboardView: View {
                     )
                 )
                 .frame(width: 3, height: 40)
-                .shadow(color: TelemetryPalette.plasmaCyan.opacity(0.28), radius: 2)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(accountDisplayTitle)
@@ -175,7 +177,7 @@ struct DashboardView: View {
                 )
         }
         .padding(14)
-        .background(panelBackground(accent: TelemetryPalette.plasmaCyan))
+        .background(panelBackground())
     }
 
     private var recentTokenPanel: some View {
@@ -230,7 +232,7 @@ struct DashboardView: View {
             }
         }
         .padding(14)
-        .background(panelBackground(accent: TelemetryPalette.electricViolet))
+        .background(panelBackground())
     }
 
     private var tokenActivityPanel: some View {
@@ -241,7 +243,7 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Token 活动")
                     .font(.system(size: 16, weight: .heavy, design: .rounded))
-                Text("每格代表一天，悬浮查看当日用量")
+                Text("按月查看每日 Token，用左右按钮切换月份")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(TelemetryPalette.plasmaCyan.opacity(0.90))
             }
@@ -255,8 +257,8 @@ struct DashboardView: View {
                 .foregroundStyle(TelemetryPalette.mutedText)
                 .frame(maxWidth: .infinity, minHeight: 142)
             } else {
-                // 全部每日 Token 日历热力图
-                TokenActivityHeatmap(buckets: allBuckets)
+                // 按月切换的每日 Token 日历
+                TokenActivityCalendar(buckets: allBuckets)
             }
 
             HStack(spacing: 10) {
@@ -296,7 +298,7 @@ struct DashboardView: View {
             }
         }
         .padding(14)
-        .background(panelBackground(accent: TelemetryPalette.plasmaCyan))
+        .background(panelBackground())
     }
 
     private var quotaSection: some View {
@@ -334,7 +336,7 @@ struct DashboardView: View {
             }
         }
         .padding(14)
-        .background(panelBackground(accent: TelemetryPalette.ionBlue))
+        .background(panelBackground())
     }
 
     @ViewBuilder
@@ -349,7 +351,7 @@ struct DashboardView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(14)
-            .background(panelBackground(accent: TelemetryPalette.warningAmber))
+            .background(panelBackground())
         }
     }
 
@@ -513,11 +515,10 @@ struct DashboardView: View {
         return calendar
     }
 
-    /// 创建带遥测强调色的深色面板背景。
-    /// - Parameter accent: 面板顶部信号线与边框强调色。
-    /// - Returns: 6pt 圆角遥测面板。
-    private func panelBackground(accent: Color) -> some View {
-        TelemetryPanelBackground(accent: accent)
+    /// 创建无方向性阴影和渐变的统一模块背景。
+    /// - Returns: 6pt 圆角浅色面板。
+    private func panelBackground() -> some View {
+        TelemetryPanelBackground()
     }
 }
 
@@ -548,32 +549,13 @@ private struct TelemetryBackdrop: View {
 }
 
 private struct TelemetryPanelBackground: View {
-    // 面板信号强调色。
-    let accent: Color
-
     var body: some View {
         RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(.clear)
-            .background(
-                VisualEffectView(material: .contentBackground, blendingMode: .withinWindow)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            )
+            .fill(TelemetryPalette.panel)
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(TelemetryPalette.panel)
+                    .strokeBorder(Color.primary.opacity(0.085), lineWidth: 0.8)
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [accent.opacity(0.24), Color.white.opacity(0.78), accent.opacity(0.10)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.8
-                    )
-            )
-            .shadow(color: Color.black.opacity(0.065), radius: 12, y: 5)
     }
 }
 
@@ -756,93 +738,99 @@ private func compactTokenCount(_ value: Int64) -> String {
     return "\(value)"
 }
 
-private struct TokenHeatmapDay: Identifiable {
-    let date: Date
-    let dateLabel: String
+private struct TokenCalendarDay: Identifiable {
+    // 当前日期在月历网格中的位置。
+    let position: Int
+    // 对应自然日；nil 表示月首或月尾的留白格。
+    let date: Date?
+    // 当日 Token；nil 表示没有记录。
     let tokens: Int64?
 
-    var id: TimeInterval {
-        date.timeIntervalSinceReferenceDate
+    var id: Int {
+        position
     }
 }
 
-private struct TokenHeatmapWeek: Identifiable {
-    let days: [TokenHeatmapDay]
-    let monthLabel: String?
-
-    var id: TimeInterval {
-        days.first?.id ?? 0
-    }
-}
-
-struct TokenActivityHeatmap: View {
+struct TokenActivityCalendar: View {
+    // 是否减少月份切换动画。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // 全部按日期升序排列的每日 Token 数据。
     let buckets: [TokenUsageDailyBucket]
-    // 当前鼠标悬浮的热力图日期。
-    @State private var hoveredDay: TokenHeatmapDay?
+    // 相对当前月份的偏移量，0 表示当月。
+    @State private var monthOffset = 0
+    // 当前鼠标悬浮的日历日期。
+    @State private var hoveredDay: TokenCalendarDay?
+
+    // 月历从周一到周日展示。
+    private static let weekdayTitles = ["一", "二", "三", "四", "五", "六", "日"]
+    // 月历固定为七列。
+    private let calendarColumns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
     var body: some View {
-        let weeks = makeWeeks()
-        let maxTokens = max(1, weeks.flatMap(\.days).compactMap(\.tokens).max() ?? 1)
+        let days = makeMonthDays()
+        let maxTokens = max(1, days.compactMap(\.tokens).max() ?? 1)
+        let monthTotal = days.compactMap(\.tokens).reduce(Int64(0), +)
 
-        VStack(alignment: .leading, spacing: 8) {
-            Text(hoveredDay.map(dayHelpText) ?? "悬浮色块查看当日 Token")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(hoveredDay == nil ? TelemetryPalette.mutedText : TelemetryPalette.plasmaCyan)
-                .lineLimit(1)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 10) {
+                monthNavigationButton(
+                    systemName: "chevron.left",
+                    change: -1,
+                    isDisabled: !canNavigatePrevious
+                )
 
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 3) {
-                        ForEach(weeks) { week in
-                            VStack(alignment: .leading, spacing: 5) {
-                                VStack(spacing: 3) {
-                                    ForEach(week.days) { day in
-                                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                            .fill(heatmapColor(tokens: day.tokens, maxTokens: maxTokens))
-                                            .frame(width: 12, height: 12)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                                    .stroke(hoveredDay?.id == day.id ? TelemetryPalette.ionBlue.opacity(0.85) : Color.clear, lineWidth: 0.8)
-                                            )
-                                            .shadow(color: hoveredDay?.id == day.id ? TelemetryPalette.ionBlue.opacity(0.24) : Color.clear, radius: 2)
-                                            .contentShape(Rectangle())
-                                            .onHover { isHovering in
-                                                updateHoveredDay(day, isHovering: isHovering)
-                                            }
-                                            .help(dayHelpText(day))
-                                            .accessibilityLabel(dayHelpText(day))
-                                    }
-                                }
+                Spacer()
 
-                                Text(week.monthLabel ?? " ")
-                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(TelemetryPalette.mutedText)
-                                    .fixedSize()
-                                    .frame(height: 15, alignment: .leading)
-                            }
-                            .id(week.id)
-                        }
-                    }
-                    .padding(.horizontal, 2)
+                VStack(spacing: 2) {
+                    Text(DateFormatter.tokenMonthTitle.string(from: displayedMonth))
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    Text(monthTotal > 0 ? "本月 \(compactTokenCount(monthTotal)) Token" : "本月暂无记录")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(TelemetryPalette.mutedText)
                 }
-                .onAppear {
-                    scrollToLatest(proxy: proxy, weeks: weeks)
-                }
-                .onChange(of: weeks.count) { _, _ in
-                    scrollToLatest(proxy: proxy, weeks: weeks)
+
+                Spacer()
+
+                monthNavigationButton(
+                    systemName: "chevron.right",
+                    change: 1,
+                    isDisabled: !canNavigateNext
+                )
+            }
+
+            HStack(spacing: 4) {
+                ForEach(Self.weekdayTitles, id: \.self) { title in
+                    Text(title)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(TelemetryPalette.mutedText)
+                        .frame(maxWidth: .infinity)
                 }
             }
+
+            LazyVGrid(columns: calendarColumns, spacing: 5) {
+                ForEach(days) { day in
+                    calendarDayCell(day, maxTokens: maxTokens)
+                }
+            }
+
+            Text(hoveredDay.map(dayHelpText) ?? "悬浮日期查看当日 Token")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(hoveredDay == nil ? TelemetryPalette.mutedText : TelemetryPalette.plasmaCyan)
+                .lineLimit(1)
+                .frame(height: 15)
         }
-        .frame(height: 142)
     }
 
-    /// 将每日 Token 数据补齐为按周排列的日历网格。
-    /// - Returns: 周一至周日纵向排列的周数据。
-    private func makeWeeks() -> [TokenHeatmapWeek] {
-        let calendar = heatmapCalendar
-        var tokensByDate: [Date: Int64] = [:]
+    /// 创建单个月份的日历网格，并在月首、月尾补齐空白格。
+    /// - Returns: 从周一开始排列的月历单元格。
+    private func makeMonthDays() -> [TokenCalendarDay] {
+        let calendar = activityCalendar
+        let month = displayedMonth
+        guard let dayRange = calendar.range(of: .day, in: .month, for: month) else {
+            return []
+        }
 
+        var tokensByDate: [Date: Int64] = [:]
         for bucket in buckets {
             guard let parsedDate = DateFormatter.tokenDay.date(from: String(bucket.startDate.prefix(10))) else {
                 continue
@@ -851,112 +839,223 @@ struct TokenActivityHeatmap: View {
             tokensByDate[date, default: 0] += max(0, bucket.tokens)
         }
 
-        guard let firstDate = tokensByDate.keys.min(),
-              let lastDate = tokensByDate.keys.max() else {
-            return []
-        }
+        let firstWeekdayOffset = (calendar.component(.weekday, from: month) + 5) % 7
+        // 固定六周高度，切换不同月份时避免面板和边框上下跳动。
+        let positionCount = 42
 
-        // 日历热力图按周一开头补齐首尾空白日期。
-        let firstOffset = (calendar.component(.weekday, from: firstDate) + 5) % 7
-        let lastOffset = 6 - ((calendar.component(.weekday, from: lastDate) + 5) % 7)
-        guard let gridStart = calendar.date(byAdding: .day, value: -firstOffset, to: firstDate),
-              let gridEnd = calendar.date(byAdding: .day, value: lastOffset, to: lastDate),
-              let totalDays = calendar.dateComponents([.day], from: gridStart, to: gridEnd).day else {
-            return []
-        }
-
-        var weeks: [TokenHeatmapWeek] = []
-        let weekCount = totalDays / 7 + 1
-        for weekIndex in 0..<weekCount {
-            guard let weekStart = calendar.date(byAdding: .day, value: weekIndex * 7, to: gridStart) else {
-                continue
+        return (0..<positionCount).map { position in
+            let dayNumber = position - firstWeekdayOffset + 1
+            guard dayRange.contains(dayNumber),
+                  let date = calendar.date(byAdding: .day, value: dayNumber - 1, to: month) else {
+                return TokenCalendarDay(position: position, date: nil, tokens: nil)
             }
-            let days = (0..<7).compactMap { dayIndex -> TokenHeatmapDay? in
-                guard let date = calendar.date(byAdding: .day, value: dayIndex, to: weekStart) else {
-                    return nil
-                }
-                return TokenHeatmapDay(
-                    date: date,
-                    dateLabel: DateFormatter.tokenDay.string(from: date),
-                    tokens: tokensByDate[date]
-                )
-            }
-            let monthStart = days.first { calendar.component(.day, from: $0.date) == 1 }
-            // 首周即使不包含每月 1 日，也要显示当前数据所属月份。
-            let monthLabelDate = monthStart?.date ?? (weekIndex == 0 ? firstDate : nil)
-            weeks.append(
-                TokenHeatmapWeek(
-                    days: days,
-                    monthLabel: monthLabelDate.map { DateFormatter.tokenMonth.string(from: $0) }
-                )
+            let normalizedDate = calendar.startOfDay(for: date)
+            return TokenCalendarDay(
+                position: position,
+                date: normalizedDate,
+                tokens: tokensByDate[normalizedDate]
             )
         }
-        return weeks
     }
 
-    /// 根据当日 Token 占峰值比例返回四级蓝色色阶。
+    /// 创建单个日期格，显示日期、Token 强度和当天标记。
+    /// - Parameters:
+    ///   - day: 月历日期单元格。
+    ///   - maxTokens: 当前月份单日最大 Token。
+    /// - Returns: 月历日期视图。
+    @ViewBuilder
+    private func calendarDayCell(_ day: TokenCalendarDay, maxTokens: Int64) -> some View {
+        if let date = day.date {
+            let isToday = activityCalendar.isDateInToday(date)
+            let isFuture = date > activityCalendar.startOfDay(for: Date())
+            let isHovered = hoveredDay?.id == day.id
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(activityCalendar.component(.day, from: date))")
+                    .font(.system(size: 11, weight: isToday ? .heavy : .semibold, design: .monospaced))
+                Text(day.tokens.map { compactTokenCount($0) } ?? "·")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(day.tokens == nil ? TelemetryPalette.mutedText : Color.primary.opacity(0.76))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .padding(.horizontal, 5)
+            .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(calendarDayColor(tokens: day.tokens, maxTokens: maxTokens))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(
+                        isToday
+                            ? TelemetryPalette.ionBlue.opacity(0.90)
+                            : isHovered
+                            ? TelemetryPalette.plasmaCyan.opacity(0.72)
+                            : Color.primary.opacity(0.06),
+                        lineWidth: isToday ? 1.2 : 0.7
+                    )
+            )
+            .opacity(isFuture ? 0.48 : 1)
+            .contentShape(Rectangle())
+            .onHover { isHovering in
+                updateHoveredDay(day, isHovering: isHovering)
+            }
+            .help(dayHelpText(day))
+            .accessibilityLabel(dayHelpText(day))
+        } else {
+            Color.clear
+                .frame(height: 32)
+        }
+    }
+
+    /// 根据当日 Token 占当月峰值的比例返回日历底色。
     /// - Parameters:
     ///   - tokens: 当日 Token；nil 表示该日期没有记录。
-    ///   - maxTokens: 当前全部日期中的单日最大值。
-    /// - Returns: 对应强度的热力图颜色。
-    private func heatmapColor(tokens: Int64?, maxTokens: Int64) -> Color {
+    ///   - maxTokens: 当前月份单日最大 Token。
+    /// - Returns: 对应强度的日历底色。
+    private func calendarDayColor(tokens: Int64?, maxTokens: Int64) -> Color {
         guard let tokens, tokens > 0 else {
-            return Color.primary.opacity(0.045)
+            return Color.white.opacity(0.20)
         }
         let ratio = Double(tokens) / Double(maxTokens)
-        // 由离子蓝到电紫再到等离子青分为四档，便于识别高强度日期。
-        if ratio <= 0.25 {
-            return TelemetryPalette.ionBlue.opacity(0.32)
+        // 单日用量按低、中、高三档显示，避免月历色彩过碎。
+        if ratio <= 0.33 {
+            return TelemetryPalette.ionBlue.opacity(0.16)
         }
-        if ratio <= 0.50 {
-            return TelemetryPalette.ionBlue.opacity(0.66)
+        if ratio <= 0.66 {
+            return TelemetryPalette.electricViolet.opacity(0.20)
         }
-        if ratio <= 0.75 {
-            return TelemetryPalette.electricViolet.opacity(0.84)
-        }
-        return TelemetryPalette.plasmaCyan
+        return TelemetryPalette.plasmaCyan.opacity(0.28)
     }
 
-    /// 生成单个热力图色块的提示文案。
-    /// - Parameter day: 单日热力图数据。
+    /// 生成单个日期格的完整 Token 提示。
+    /// - Parameter day: 月历日期单元格。
     /// - Returns: 日期及 Token 数量说明。
-    private func dayHelpText(_ day: TokenHeatmapDay) -> String {
+    private func dayHelpText(_ day: TokenCalendarDay) -> String {
+        guard let date = day.date else {
+            return "无日期"
+        }
+        let dateLabel = DateFormatter.tokenDay.string(from: date)
         guard let tokens = day.tokens else {
-            return "\(day.dateLabel)：无记录"
+            return "\(dateLabel)：无记录"
         }
         let value = NumberFormatter.tokenCount.string(from: NSNumber(value: tokens)) ?? "\(tokens)"
-        return "\(day.dateLabel)：\(value) Token"
+        return "\(dateLabel)：\(value) Token"
     }
 
-    /// 根据鼠标进入或离开状态更新热力图悬浮信息。
+    /// 根据鼠标进入或离开状态更新日历悬浮信息。
     /// - Parameters:
-    ///   - day: 当前交互的热力图日期。
-    ///   - isHovering: 鼠标是否位于色块上。
-    private func updateHoveredDay(_ day: TokenHeatmapDay, isHovering: Bool) {
+    ///   - day: 当前交互的月历日期。
+    ///   - isHovering: 鼠标是否位于日期格内。
+    private func updateHoveredDay(_ day: TokenCalendarDay, isHovering: Bool) {
         if isHovering {
             hoveredDay = day
             return
         }
-        // 只有离开的仍是当前色块时才清空，避免快速跨格时覆盖新状态。
+        // 只有离开的仍是当前日期时才清空，避免快速跨格时覆盖新状态。
         if hoveredDay?.id == day.id {
             hoveredDay = nil
         }
     }
 
-    /// 将热力图定位到最新一周。
+    /// 创建月份左右切换按钮。
     /// - Parameters:
-    ///   - proxy: 横向滚动视图代理。
-    ///   - weeks: 当前周数据。
-    private func scrollToLatest(proxy: ScrollViewProxy, weeks: [TokenHeatmapWeek]) {
-        guard let latestWeek = weeks.last else {
+    ///   - systemName: SF Symbols 图标名称。
+    ///   - change: 月份偏移变化，-1 为上月，1 为下月。
+    ///   - isDisabled: 是否禁用切换。
+    /// - Returns: 月份切换按钮。
+    private func monthNavigationButton(systemName: String, change: Int, isDisabled: Bool) -> some View {
+        Button {
+            changeMonth(by: change)
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .bold))
+                .frame(width: 28, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.white.opacity(isDisabled ? 0.16 : 0.42))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .stroke(Color.primary.opacity(isDisabled ? 0.04 : 0.08), lineWidth: 0.7)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.46 : 1)
+    }
+
+    /// 按指定偏移切换月份，并限制在首个有记录月份到当月之间。
+    /// - Parameter change: 月份变化量，-1 为上月，1 为下月。
+    private func changeMonth(by change: Int) {
+        let targetOffset = monthOffset + change
+        guard let targetMonth = activityCalendar.date(byAdding: .month, value: targetOffset, to: currentMonth) else {
             return
         }
-        proxy.scrollTo(latestWeek.id, anchor: .trailing)
+        // 同时限制最早有记录月份和当前月份，避免切到无数据的过去或未来。
+        guard targetMonth >= earliestMonth, targetMonth <= currentMonth else {
+            return
+        }
+
+        if reduceMotion {
+            monthOffset = targetOffset
+            hoveredDay = nil
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.16)) {
+            monthOffset = targetOffset
+            hoveredDay = nil
+        }
+    }
+
+    /// 返回当前展示月份的月初日期。
+    /// - Returns: 当前月份偏移对应的月初日期。
+    private var displayedMonth: Date {
+        activityCalendar.date(byAdding: .month, value: monthOffset, to: currentMonth) ?? currentMonth
+    }
+
+    /// 返回当前自然月的月初日期。
+    /// - Returns: 当前自然月月初。
+    private var currentMonth: Date {
+        monthStart(for: Date())
+    }
+
+    /// 返回每日数据中最早月份的月初日期。
+    /// - Returns: 最早有记录的月份；没有有效日期时返回当前月份。
+    private var earliestMonth: Date {
+        let firstDate = buckets.compactMap {
+            DateFormatter.tokenDay.date(from: String($0.startDate.prefix(10)))
+        }.min()
+        guard let firstDate else {
+            return currentMonth
+        }
+        return min(monthStart(for: firstDate), currentMonth)
+    }
+
+    /// 判断是否可以切换到上一个月。
+    /// - Returns: 当前月份晚于首个有记录月份时返回 true。
+    private var canNavigatePrevious: Bool {
+        displayedMonth > earliestMonth
+    }
+
+    /// 判断是否可以切换到下一个月。
+    /// - Returns: 当前展示月份早于当月时返回 true。
+    private var canNavigateNext: Bool {
+        displayedMonth < currentMonth
+    }
+
+    /// 将日期归一化为所在月份的月初。
+    /// - Parameter date: 待归一化日期。
+    /// - Returns: 日期所在月份的月初。
+    private func monthStart(for date: Date) -> Date {
+        let components = activityCalendar.dateComponents([.year, .month], from: date)
+        return activityCalendar.date(from: components) ?? activityCalendar.startOfDay(for: date)
     }
 
     /// 创建以周一为一周起点的本地日历。
-    /// - Returns: 用于热力图日期计算的日历。
-    private var heatmapCalendar: Calendar {
+    /// - Returns: 用于 Token 月历计算的日历。
+    private var activityCalendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = Locale(identifier: "zh_CN")
         calendar.timeZone = .current
@@ -996,13 +1095,13 @@ private extension DateFormatter {
         return formatter
     }()
 
-    /// Token 热力图月份格式化器。
-    static let tokenMonth: DateFormatter = {
+    /// Token 月历标题格式化器。
+    static let tokenMonthTitle: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = .current
-        formatter.dateFormat = "M月"
+        formatter.dateFormat = "yyyy年M月"
         return formatter
     }()
 }
